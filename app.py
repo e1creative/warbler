@@ -4,8 +4,8 @@ from flask import Flask, render_template, request, flash, redirect, session, g
 from flask_debugtoolbar import DebugToolbarExtension
 from sqlalchemy.exc import IntegrityError
 
-from forms import UserAddForm, LoginForm, MessageForm
-from models import db, connect_db, User, Message
+from forms import UserAddForm, LoginForm, MessageForm, UserEditForm
+from models import db, connect_db, User, Message, Likes
 
 CURR_USER_KEY = "curr_user"
 
@@ -18,7 +18,7 @@ app.config['SQLALCHEMY_DATABASE_URI'] = (
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SQLALCHEMY_ECHO'] = False
-app.config['DEBUG_TB_INTERCEPT_REDIRECTS'] = True
+app.config['DEBUG_TB_INTERCEPT_REDIRECTS'] = False
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', "it's a secret")
 toolbar = DebugToolbarExtension(app)
 
@@ -113,7 +113,10 @@ def login():
 def logout():
     """Handle logout of user."""
 
-    # IMPLEMENT THIS
+    do_logout()
+
+    flash("You have been logged out successfully!", "danger")
+    return redirect('/login')
 
 
 ##############################################################################
@@ -177,6 +180,19 @@ def users_followers(user_id):
     return render_template('users/followers.html', user=user)
 
 
+@app.route('/users/<int:user_id>/likes')
+def users_likes(user_id):
+    """Show likst of liked warbles"""
+
+    if not g.user:
+        flash("Access unauthorized.", "danger")
+        return redirect("/")
+
+    user = User.query.get_or_404(user_id)
+    likes = [msg.id for msg in g.user.likes]
+    return render_template('users/likes.html', user=user, likes=likes)
+
+
 @app.route('/users/follow/<int:follow_id>', methods=['POST'])
 def add_follow(follow_id):
     """Add a follow for the currently-logged-in user."""
@@ -207,12 +223,74 @@ def stop_following(follow_id):
     return redirect(f"/users/{g.user.id}/following")
 
 
+@app.route('/users/add_like/<int:message_id>', methods=["POST"])
+def likes(message_id):
+
+    # if the message that the user is trying to like is the user's own message,
+    # redirect to the home page with a flash message telling the user they can
+    # only like OTHE PEOPLE'S warbles
+    # if the current message_id is in the user likes table, delete it
+    # but if not, then we add it to the likes table
+    # like = Likes.query.filter_by(session(CURR_USER_KEY))    
+
+    curr_message = Message.query.get(message_id)
+
+    if curr_message.user_id == g.user.id:
+        flash("You cannot like your own warble!", "danger")
+        return redirect('/')
+
+
+    curr_like = Likes.query.filter_by(user_id=session[CURR_USER_KEY]).filter_by(message_id=message_id).first()
+
+    if not curr_like:
+        g.user.likes.append(Message.query.get(message_id))
+        db.session.commit()
+
+    else:
+        db.session.delete(curr_like)
+        db.session.commit()
+
+
+    return redirect('/')
+
+
 @app.route('/users/profile', methods=["GET", "POST"])
 def profile():
     """Update profile for current user."""
 
-    # IMPLEMENT THIS
+    # if a user is logged in, we have the user object on the global Flask variable
+    # g.user -> currently logged in User instance
+    # session[CURR_USER_KEY]) -> curretly logged in user's ID
 
+    if not g.user:
+        return redirect("/login")
+
+    form = UserEditForm(obj=g.user)
+
+    if form.validate_on_submit():
+
+        u = User.authenticate(g.user.username, form.password.data)
+
+        # if authenticated, add the changes from our form and commig
+        if u:
+            u.name = form.username.data
+            u.email = form.email.data
+            u.image_url = form.image_url.data
+            u.header_image_url = form.header_image_url.data
+            u.bio = form.bio.data
+            u.location = form.location.data
+
+            db.session.commit()
+
+            flash("User profile updated!", "success")
+            return redirect(f"/users/{g.user.id}")
+        # if not authnticated, flash a message and redirect to home page
+        else:
+            flash("Password is incorrect!", "danger")
+            return redirect("/")
+
+    return render_template("/users/edit.html", form=form)
+    
 
 @app.route('/users/delete', methods=["POST"])
 def delete_user():
@@ -292,13 +370,23 @@ def homepage():
     """
 
     if g.user:
+
+        following_ids = [user.id for user in g.user.following]
+
         messages = (Message
                     .query
+                    .filter((Message.user_id.in_(following_ids)) | (Message.user_id == g.user.id))
                     .order_by(Message.timestamp.desc())
                     .limit(100)
                     .all())
+        
+        # create a list of message ID's from the global user's likes
+        # g.user.likes-> list of messages.  loop over the returned
+        # messages and get the id for each message then pass the list
+        # to our home template.
+        likes = [msg.id for msg in g.user.likes]
 
-        return render_template('home.html', messages=messages)
+        return render_template('home.html', messages=messages, likes=likes)
 
     else:
         return render_template('home-anon.html')
@@ -320,3 +408,10 @@ def add_header(req):
     req.headers["Expires"] = "0"
     req.headers['Cache-Control'] = 'public, max-age=0'
     return req
+
+
+    # print('')
+    # print('*************')
+    # print('curr_message')
+    # print('*************')
+    # print('')
