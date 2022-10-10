@@ -18,7 +18,7 @@ app.config['SQLALCHEMY_DATABASE_URI'] = (
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SQLALCHEMY_ECHO'] = False
-app.config['DEBUG_TB_INTERCEPT_REDIRECTS'] = False
+app.config['DEBUG_TB_INTERCEPT_REDIRECTS'] = True
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', "it's a secret")
 toolbar = DebugToolbarExtension(app)
 
@@ -75,13 +75,22 @@ def signup():
                 email=form.email.data,
                 image_url=form.image_url.data or User.image_url.default.arg,
             )
+            # print('')
+            # print('*************************')
+            # print(user)
+            # print('*************************')
+            # print('')
+
             db.session.commit()
 
+            do_login(user)
+
         except IntegrityError:
+            #
+            # need to find a way to figure out which error
+            #
             flash("Username already taken", 'danger')
             return render_template('users/signup.html', form=form)
-
-        do_login(user)
 
         return redirect("/")
 

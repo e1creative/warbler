@@ -31,6 +31,7 @@ db.create_all()
 # Don't have WTForms use CSRF at all, since it's a pain to test
 
 app.config['WTF_CSRF_ENABLED'] = False
+app.config['DEBUG_TB_HOSTS'] = ['dont-show-debug-toolbar']
 
 
 class MessageViewTestCase(TestCase):
@@ -52,7 +53,7 @@ class MessageViewTestCase(TestCase):
         db.session.commit()
 
     def test_add_message(self):
-        """Can use add a message?"""
+        """Can user add a message?"""
 
         # Since we need to change the session to mimic logging in,
         # we need to use the changing-session trick:
@@ -71,3 +72,33 @@ class MessageViewTestCase(TestCase):
 
             msg = Message.query.one()
             self.assertEqual(msg.text, "Hello")
+
+
+    def test_show_message(self):
+        """Test the show messages route."""
+
+        with self.client as c:
+            with c.session_transaction() as sess:
+                sess[CURR_USER_KEY] = self.testuser.id
+
+            resp = c.post("/messages/new", data={"text": "Hello"})
+
+            msg = Message.query.one()
+            resp = c.get(f'/messages/{msg.id}')
+
+            self.assertEqual(resp.status_code, 200)
+
+
+    def test_destroy_message(self):
+        """Can user delete a message?"""
+
+        with self.client as c:
+            with c.session_transaction() as sess:
+                sess[CURR_USER_KEY] = self.testuser.id
+
+            resp = c.post("/messages/new", data={"text": "Hello"})
+
+            msg = Message.query.one()
+            resp = c.post(f'/messages/{msg.id}/delete')
+            
+            self.assertEqual(Message.query.all(), [])
